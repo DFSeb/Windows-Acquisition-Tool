@@ -18,7 +18,7 @@ The script uses only standard library modules:
 No external packages need to be installed.
 
 ## Installation
-1. Save the Python script as `vhd_container_creator.py`
+1. Save the Python script as `Targeted_Windows_AcquisitionTool.py`
 2. Ensure you have Python installed on your system
 
 ## Usage Instructions
@@ -28,7 +28,7 @@ No external packages need to be installed.
 2. Navigate to the directory containing the script
 3. Run the script:
    ```
-   python vhd_container_creator.py
+   python Targeted_Windows_AcquisitionTool.py
    ```
 
 ### Script Workflow
