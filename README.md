@@ -16,6 +16,7 @@ The script uses only standard library modules:
 - os, sys, time, platform, subprocess, logging, shutil, datetime, winreg, ctypes
 
 No external packages need to be installed.
+*Use an executable generator of your choice (i.e. Pyinstaller) to generate a self-contained executable and eliminate need for Python on the working system
 
 ## Installation
 1. Save the Python script as `Targeted_Windows_AcquisitionTool.py`
@@ -34,7 +35,7 @@ No external packages need to be installed.
 ### Script Workflow
 1. The script will check if it has administrator privileges
 2. System information will be gathered and saved to `system_info.txt`
-3. You'll be prompted to enter the path to the file or directory you want to store
+3. You'll be prompted to enter the paths to the files or directorys you want to store
 4. The script will calculate the required VHD size
 5. You'll be prompted to enter where to save the VHD file
 6. The script will create, mount, and populate the VHD with your data
@@ -96,5 +97,5 @@ If you encounter issues, check the `vhd_operation.log` file for detailed error i
 
 ## Security Notes
 - This script requires administrator privileges because it uses diskpart to create and manipulate VHD files
-- The VHD is not encrypted by default; consider encrypting it with BitLocker for sensitive data
+- The VHD is not encrypted by default; consider encrypting it with BitLocker or Veracrypt for sensitive data
 - The script attempts to preserve file permissions, but there may be limitations depending on the specific attributes
