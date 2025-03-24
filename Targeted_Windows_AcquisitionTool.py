@@ -172,6 +172,18 @@ def calculate_file_size(path):
     size_mb = int((os.path.getsize(path) / (1024 * 1024)) * 1.2)
     return max(100, size_mb)  # Minimum 100MB
 
+def calculate_total_size(paths):
+    """Calculate the total size needed for all files and directories"""
+    total_size_mb = 0
+    
+    for path in paths:
+        if os.path.isdir(path):
+            total_size_mb += calculate_directory_size(path)
+        else:
+            total_size_mb += calculate_file_size(path)
+    
+    return total_size_mb
+
 def copy_with_metadata(src, dst):
     """Copy a file preserving metadata"""
     logging.info(f"Copying {src} to {dst}")
@@ -196,6 +208,42 @@ def copy_with_metadata(src, dst):
     except Exception as e:
         logging.warning(f"Could not copy extended attributes: {e}")
 
+def copy_to_vhd(source_path, vhd_mount_point):
+    """Copy a file or directory to the VHD"""
+    is_directory = os.path.isdir(source_path)
+    
+    if is_directory:
+        # Create a directory with the same name in the VHD
+        base_name = os.path.basename(source_path)
+        vhd_target = os.path.join(vhd_mount_point, base_name)
+        os.makedirs(vhd_target, exist_ok=True)
+        
+        # Copy the directory contents
+        print(f"Copying directory {source_path} to {vhd_target}...")
+        
+        for root, dirs, files in os.walk(source_path):
+            # Create the relative path in the VHD
+            rel_path = os.path.relpath(root, source_path)
+            vhd_dir = os.path.join(vhd_target, rel_path)
+            
+            # Create the directory in the VHD
+            os.makedirs(vhd_dir, exist_ok=True)
+            
+            # Copy files in this directory
+            for file in files:
+                src_file = os.path.join(root, file)
+                dst_file = os.path.join(vhd_dir, file)
+                copy_with_metadata(src_file, dst_file)
+    else:
+        # Copy the file to the VHD
+        file_name = os.path.basename(source_path)
+        vhd_target = os.path.join(vhd_mount_point, file_name)
+        
+        print(f"Copying file {source_path} to {vhd_target}...")
+        copy_with_metadata(source_path, vhd_target)
+    
+    return is_directory
+
 def main():
     # Check if running as administrator
     if not is_admin():
@@ -218,27 +266,40 @@ def main():
     
     print("\nSystem information saved to system_info.txt")
     
-    # Prompt for file or directory
-    print("\nPlease enter the path to the file or directory you want to store in a VHD:")
-    source_path = input("> ").strip()
+    # Collect multiple paths
+    source_paths = []
+    print("\nEnter the paths to files or directories you want to store in the VHD.")
+    print("Enter each path one at a time. Type 'done' when finished.")
     
-    # Validate path
-    if not os.path.exists(source_path):
-        logging.error(f"Path not found: {source_path}")
-        print(f"Error: Path not found: {source_path}")
+    path_num = 1
+    while True:
+        path = input(f"Path #{path_num} (or 'done' to finish): ").strip()
+        
+        if path.lower() == 'done':
+            break
+        
+        #Removes leading/trailing double-quotes if detected
+        if '\"' in path:
+            path = path.strip('\"')
+        
+        # Validate path
+        if not os.path.exists(path):
+            print(f"Error: Path not found: {path}")
+            continue
+        
+        source_paths.append(path)
+        path_num += 1 #Tracks number of paths inputed for users' reference
+    
+    # Check if any paths were entered
+    if not source_paths:
+        logging.error("No valid paths entered")
+        print("Error: No valid paths entered")
         input("Press Enter to exit...")
         sys.exit(1)
     
-    # Determine if it's a file or directory
-    is_directory = os.path.isdir(source_path)
-    
-    # Calculate required size
-    if is_directory:
-        size_mb = calculate_directory_size(source_path)
-        print(f"\nCalculated size: {size_mb} MB for directory")
-    else:
-        size_mb = calculate_file_size(source_path)
-        print(f"\nCalculated size: {size_mb} MB for file")
+    # Calculate total size needed
+    total_size_mb = calculate_total_size(source_paths)
+    print(f"\nCalculated total size needed: {total_size_mb} MB")
     
     # Prompt for VHD location
     print("\nPlease enter the path where you want to save the VHD file:")
@@ -256,49 +317,32 @@ def main():
     
     try:
         # Create the VHD
-        vhd_mount_point = create_vhd(full_vhd_path, size_mb)
+        vhd_mount_point = create_vhd(full_vhd_path, total_size_mb)
         
         print(f"\nVHD created and mounted at {vhd_mount_point}")
         
-        # Copy files to the VHD
-        if is_directory:
-            # Create a directory with the same name in the VHD
-            base_name = os.path.basename(source_path)
-            vhd_target = os.path.join(vhd_mount_point, base_name)
-            os.makedirs(vhd_target, exist_ok=True)
-            
-            # Copy the directory contents
-            print(f"\nCopying directory {source_path} to {vhd_target}...")
-            
-            for root, dirs, files in os.walk(source_path):
-                # Create the relative path in the VHD
-                rel_path = os.path.relpath(root, source_path)
-                vhd_dir = os.path.join(vhd_target, rel_path)
-                
-                # Create the directory in the VHD
-                os.makedirs(vhd_dir, exist_ok=True)
-                
-                # Copy files in this directory
-                for file in files:
-                    src_file = os.path.join(root, file)
-                    dst_file = os.path.join(vhd_dir, file)
-                    copy_with_metadata(src_file, dst_file)
-        else:
-            # Copy the file to the VHD
-            file_name = os.path.basename(source_path)
-            vhd_target = os.path.join(vhd_mount_point, file_name)
-            
-            print(f"\nCopying file {source_path} to {vhd_target}...")
-            copy_with_metadata(source_path, vhd_target)
+        # Store information about what was copied
+        copied_items = []
         
-        print("\nAll files copied successfully!")
+        # Copy each path to the VHD
+        for path in source_paths:
+            is_dir = copy_to_vhd(path, vhd_mount_point)
+            copied_items.append((path, is_dir))
+        
+        print("\nAll files and directories copied successfully!")
         
         # Create a manifest file
         manifest_path = os.path.join(vhd_mount_point, "manifest.txt")
         with open(manifest_path, 'w') as f:
             f.write(f"Backup created on: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
-            f.write(f"Source: {source_path}\n")
-            f.write(f"Is Directory: {is_directory}\n\n")
+            f.write(f"Number of items: {len(source_paths)}\n\n")
+            
+            for idx, (path, is_dir) in enumerate(copied_items):
+                f.write(f"Item #{idx+1}:\n")
+                f.write(f"  Source: {path}\n")
+                f.write(f"  Type: {'Directory' if is_dir else 'File'}\n")
+            
+            f.write("\n\nSystem Information:\n")
             f.write(system_info)
         
         print("\nManifest file created.")
