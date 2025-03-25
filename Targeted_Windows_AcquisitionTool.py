@@ -9,6 +9,9 @@ from datetime import datetime
 import winreg
 import ctypes
 from ctypes import wintypes
+import win32file
+import win32con
+import pywintypes
 
 # Set up logging
 logging.basicConfig(
@@ -185,28 +188,120 @@ def calculate_total_size(paths):
     return total_size_mb
 
 def copy_with_metadata(src, dst):
-    """Copy a file preserving metadata"""
+    """
+    Comprehensively copy a file or directory preserving all metadata
+    
+    Args:
+        src (str): Source file or directory path
+        dst (str): Destination file or directory path
+    """
     logging.info(f"Copying {src} to {dst}")
     
-    # First, copy the file
-    shutil.copy2(src, dst)
-    
-    # Try to copy extended attributes and ACLs
     try:
-        subprocess.run(['icacls', dst, '/setintegritylevel', 'medium'], 
-                      capture_output=True, check=False)
+        # Determine if source is a file or directory
+        if os.path.isfile(src):
+            # For files
+            try:
+                # Get source file attributes
+                src_info = win32file.GetFileAttributesEx(src)
+                
+                # Copy the file
+                shutil.copy2(src, dst)
+                
+                # Open the source file to get precise timestamps
+                src_handle = win32file.CreateFile(
+                    src, 
+                    win32con.GENERIC_READ, 
+                    win32con.FILE_SHARE_READ, 
+                    None, 
+                    win32con.OPEN_EXISTING, 
+                    win32con.FILE_ATTRIBUTE_NORMAL, 
+                    None
+                )
+                
+                # Get file times
+                creation_time, last_access_time, last_write_time = win32file.GetFileTime(src_handle)
+                src_handle.Close()
+                
+                # Open destination file to set timestamps
+                dst_handle = win32file.CreateFile(
+                    dst, 
+                    win32con.GENERIC_WRITE, 
+                    0, 
+                    None, 
+                    win32con.OPEN_EXISTING, 
+                    win32con.FILE_ATTRIBUTE_NORMAL, 
+                    None
+                )
+                
+                # Set precise timestamps
+                win32file.SetFileTime(
+                    dst_handle, 
+                    creation_time, 
+                    last_access_time, 
+                    last_write_time
+                )
+                dst_handle.Close()
+                
+                # Restore original file attributes
+                win32file.SetFileAttributes(dst, src_info[0])
+                
+            except Exception as e:
+                logging.error(f"Error copying file metadata: {e}")
+                raise
         
-        # Copy ACLs
-        subprocess.run(['icacls', src, '/save', 'acls.txt'], 
-                      capture_output=True, check=False)
-        subprocess.run(['icacls', dst, '/restore', 'acls.txt'], 
-                      capture_output=True, check=False)
+        elif os.path.isdir(src):
+            # For directories
+            # Use custom recursive copy to preserve directory metadata
+            def copy_dir_with_metadata(src_dir, dst_dir):
+                # Create destination directory
+                os.makedirs(dst_dir, exist_ok=True)
+                
+                # Copy directory attributes
+                try:
+                    src_attrs = win32file.GetFileAttributesEx(src_dir)
+                    win32file.SetFileAttributes(dst_dir, src_attrs[0])
+                except Exception as e:
+                    logging.warning(f"Could not copy directory attributes: {e}")
+                
+                # Copy contents
+                for item in os.listdir(src_dir):
+                    s = os.path.join(src_dir, item)
+                    d = os.path.join(dst_dir, item)
+                    
+                    if os.path.isdir(s):
+                        copy_dir_with_metadata(s, d)
+                    else:
+                        copy_with_metadata(s, d)
+            
+            # Perform recursive copy
+            copy_dir_with_metadata(src, dst)
         
-        # Clean up
-        if os.path.exists('acls.txt'):
-            os.remove('acls.txt')
+        return dst
+    
     except Exception as e:
-        logging.warning(f"Could not copy extended attributes: {e}")
+        logging.error(f"Metadata copy failed: {e}")
+        raise
+
+# Additional helper function for comprehensive copy
+def robust_copy(src, dst):
+    """
+    Wrapper function for comprehensive copy with detailed logging
+    
+    Args:
+        src (str): Source path
+        dst (str): Destination path
+    
+    Returns:
+        str: Destination path
+    """
+    try:
+        copy_with_metadata(src, dst)
+        logging.info(f"Successfully copied {src} to {dst} with all metadata")
+        return dst
+    except Exception as e:
+        logging.error(f"Copy failed for {src}: {e}")
+        raise
 
 def copy_to_vhd(source_path, vhd_mount_point):
     """Copy a file or directory to the VHD"""
@@ -233,14 +328,14 @@ def copy_to_vhd(source_path, vhd_mount_point):
             for file in files:
                 src_file = os.path.join(root, file)
                 dst_file = os.path.join(vhd_dir, file)
-                copy_with_metadata(src_file, dst_file)
+                robust_copy(src_file, dst_file)
     else:
         # Copy the file to the VHD
         file_name = os.path.basename(source_path)
         vhd_target = os.path.join(vhd_mount_point, file_name)
         
         print(f"Copying file {source_path} to {vhd_target}...")
-        copy_with_metadata(source_path, vhd_target)
+        robust_copy(source_path, vhd_target)
     
     return is_directory
 
